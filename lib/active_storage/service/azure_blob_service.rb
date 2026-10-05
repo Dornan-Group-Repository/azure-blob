@@ -38,6 +38,8 @@ module ActiveStorage
     def initialize(storage_account_name:, storage_access_key: nil, container:, storage_blob_host: nil, public: false, **options)
       @container = container
       @public = public
+      @block_size = options[:block_size]
+
       @client = AzureBlob::Client.new(
         account_name: storage_account_name,
         access_key: storage_access_key,
@@ -51,7 +53,20 @@ module ActiveStorage
         handle_errors do
           content_disposition = content_disposition_with(filename: filename, type: disposition) if disposition && filename
 
-          client.create_block_blob(key, IO.try_convert(io) || io, content_md5: checksum, content_type: content_type, content_disposition: content_disposition, metadata: custom_metadata)
+          upload_options = {
+            content_md5: checksum,
+            content_type: content_type,
+            content_disposition: content_disposition,
+            metadata: custom_metadata,
+          }
+
+          upload_options[:block_size] = @block_size if @block_size
+
+          client.create_block_blob(
+            key,
+            IO.try_convert(io) || io,
+            **upload_options
+          )
         end
       end
     end

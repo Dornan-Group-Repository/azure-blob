@@ -11,6 +11,7 @@ require_relative "entra_id_signer"
 require "time"
 require "base64"
 require "stringio"
+require "openssl"
 
 module AzureBlob
   # AzureBlob Client class. You interact with the Azure Blob api
@@ -43,9 +44,10 @@ module AzureBlob
     # [+:content_disposition+]
     #   Will be saved on the blob in Azure.
     # [+:content_md5+]
-    #   Will ensure integrity of the upload. The checksum must be a base64 digest. Can be produced with +OpenSSL::Digest::MD5.base64digest+.
-    #   The checksum is only checked on a single upload! To verify checksum when uploading multiple blocks, call directly put_blob_block with
-    #   a checksum for each block, then commit the blocks with commit_blob_blocks.
+    #   Will ensure integrity of the upload. The checksum must be a base64 digest.
+    #   For single-request uploads it is the checksum of the complete blob.
+    #   For multipart uploads the client automatically calculates and sends a
+    #   checksum for each block.
     # [+:block_size+]
     #   Block size in bytes, can be used to force the method to split the upload in smaller chunk. Defaults to +AzureBlob::DEFAULT_BLOCK_SIZE+ and cannot be bigger than +AzureBlob::MAX_UPLOAD_SIZE+
     def create_block_blob(key, content, options = {})
@@ -405,8 +407,20 @@ module AzureBlob
       content = StringIO.new(content) if content.is_a? String
       block_size = options[:block_size] || DEFAULT_BLOCK_SIZE
       block_count = (content_size(content).to_f / block_size).ceil
+
       block_ids = block_count.times.map do |i|
-        put_blob_block(key, i, content.read(block_size), options.slice(:timeout))
+        block = content.read(block_size)
+
+        put_blob_block(
+          key,
+          i,
+          block,
+          options
+            .slice(:timeout)
+            .merge(
+              content_md5: OpenSSL::Digest::MD5.base64digest(block)
+            )
+        )
       end
 
       commit_blob_blocks(key, block_ids, options)
